@@ -78,6 +78,7 @@ async function run() {
     // manager middlewere করতে হবে***********
     app.post("/products", async (req, res) => {
       const productInfo = req.body;
+      productInfo.createdAt = new Date().toLocaleString()
       const result = await productsCollection.insertOne(productInfo);
       res.send(result);
     });
@@ -93,7 +94,7 @@ async function run() {
               product_data: {
                 name: paymentInfo?.productName,
               },
-              unit_amount: paymentInfo?.orderPrice * 100,
+              unit_amount: paymentInfo?.productPrice * 100,
             },
             quantity: paymentInfo?.orderQuantity,
           },
@@ -104,13 +105,52 @@ async function run() {
           productId: paymentInfo?.id,
           customerName: paymentInfo?.firstName,
           customerEmail: paymentInfo?.email,
+          customerAddress: paymentInfo?.address,
+          quantity: paymentInfo?.orderQuantity
         },
-        success_url: `${process.env.CLIENT_DOMAIN}/payment-success`,
+        success_url: `${process.env.CLIENT_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${process.env.CLIENT_DOMAIN}/productDetails/${paymentInfo?.id}`,
       });
 
       res.send({url: session.url})
     });
+
+
+
+    app.post('/payment-success', async(req, res)=> {
+      const {sessionId} = req.body
+      const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+      const product = await productsCollection.findOne({_id: new ObjectId(session.metadata.productId)})
+
+      const order = await ordersCollection.findOne({transectionId:session.payment_intent})
+
+      if(session.status === 'complete' && product && !order){
+        const orderInfo = {
+          productId: session.metadata.productId,
+          transectionId: session.payment_intent,
+          customer: session.metadata.customerName,
+          status: "Panding",
+          customerAddress: session.metadata.customerAddress,
+          quantity: session.metadata.quantity,
+          seller: product.sellerName,
+          price: session.amount_total / 100
+        }
+        const result = await ordersCollection.insertOne(orderInfo)
+
+        await productsCollection.updateOne(
+          {_id: new ObjectId(session.metadata.productId),},
+          {
+            $inc: {availableQuantity: -1}
+          }
+        )
+        return res.send({
+          transectionId: session.payment_intent,
+          orderId: order._id
+        })
+      }
+      res.send(result)
+    })
 
     await client.db("admin").command({ ping: 1 });
     console.log(
