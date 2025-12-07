@@ -2,17 +2,27 @@ const express = require("express");
 const cors = require("cors");
 const app = express();
 require("dotenv").config();
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+const stripe = require("stripe")(process.env.SRTIPE_SECRET_KEY);
 const port = process.env.PORT || 3000;
+const crypto = require("crypto");
 
 // MiddleWare
 app.use(express.json());
 app.use(cors());
 
+const generateTrackingId = () => {
+  const prefix = "PRCL";
+  const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const random = crypto.randomBytes(3).toString("hex").toUpperCase();
+
+  return `${prefix}-${date}-${random}`;
+};
+
 const verifyFBToken = (req, res, next) => {
-    console.log('headers:', req.headers.authorization)
-    next()
-}
+  console.log("headers:", req.headers.authorization);
+  next();
+};
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@simple-crud-serv.sbd6kzc.mongodb.net/?appName=Simple-CRUD-Serv`;
 
@@ -33,9 +43,10 @@ async function run() {
     await client.connect();
     const db = client.db("GarmentsPro");
     const userCollection = db.collection("users");
+    const productsCollection = db.collection("products");
+    const ordersCollection = db.collection("orders");
 
-
-
+    // user
     app.post("/users", async (req, res) => {
       const user = req.body;
       user.status = "Panding";
@@ -50,7 +61,56 @@ async function run() {
       res.send(result);
     });
 
+    // Products
+    app.get("/products", async (req, res) => {
+      const result = await productsCollection.find().toArray();
+      res.send(result);
+    });
 
+    app.get("/product/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await productsCollection.findOne({
+        _id: new ObjectId(id),
+      });
+      res.send(result);
+    });
+
+    // manager middlewere করতে হবে***********
+    app.post("/products", async (req, res) => {
+      const productInfo = req.body;
+      const result = await productsCollection.insertOne(productInfo);
+      res.send(result);
+    });
+
+    // Payment
+    app.post("/create-checkout-session", async (req, res) => {
+      const paymentInfo = req.body;
+      const session = await stripe.checkout.sessions.create({
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: {
+                name: paymentInfo?.productName,
+              },
+              unit_amount: paymentInfo?.orderPrice * 100,
+            },
+            quantity: paymentInfo?.orderQuantity,
+          },
+        ],
+        customer_email: paymentInfo?.email,
+        mode: "payment",
+        metadata: {
+          productId: paymentInfo?.id,
+          customerName: paymentInfo?.firstName,
+          customerEmail: paymentInfo?.email,
+        },
+        success_url: `${process.env.CLIENT_DOMAIN}/payment-success`,
+        cancel_url: `${process.env.CLIENT_DOMAIN}/productDetails/${paymentInfo?.id}`,
+      });
+
+      res.send({url: session.url})
+    });
 
     await client.db("admin").command({ ping: 1 });
     console.log(
