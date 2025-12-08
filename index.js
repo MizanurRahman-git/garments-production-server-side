@@ -7,6 +7,14 @@ const stripe = require("stripe")(process.env.SRTIPE_SECRET_KEY);
 const port = process.env.PORT || 3000;
 const crypto = require("crypto");
 
+const admin = require("firebase-admin");
+
+const serviceAccount = require("./garments-firebase-adminsdk.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+
 // MiddleWare
 app.use(express.json());
 app.use(cors());
@@ -19,9 +27,16 @@ const generateTrackingId = () => {
   return `${prefix}-${date}-${random}`;
 };
 
-const verifyFBToken = (req, res, next) => {
-  console.log("headers:", req.headers.authorization);
-  next();
+const verifyFBToken = async (req, res, next) => {
+  const token = req?.headers?.authorization?.split(" ")[1];
+  if (!token) return res.status(401).send({ message: "Unauthorized Access!" });
+  try {
+    const decoded = await admin.auth().verifyIdToken(token);
+    req.tokenEmail = decoded.email;
+    next();
+  } catch (err) {
+    return res.status(401).send({ message: "Unauthorized Access!", err });
+  }
 };
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@simple-crud-serv.sbd6kzc.mongodb.net/?appName=Simple-CRUD-Serv`;
@@ -46,17 +61,31 @@ async function run() {
     const productsCollection = db.collection("products");
     const ordersCollection = db.collection("orders");
 
-
-
-
-
     // get user for admin
-    app.get('/users', async(req, res)=> {
+    app.get("/users", verifyFBToken, async (req, res) => {
       const result = await userCollection.find().toArray();
       res.send(result);
-    })
+    });
 
+    // get user role
+    app.get("/user/role", verifyFBToken, async (req, res) => {
+      const result = await userCollection.findOne({ email: req.tokenEmail });
+      res.send({ role: result?.role });
+    });
 
+    // update user role
+    app.patch("/users/:email/role", async (req, res) => {
+      const email = req.params.email;
+      const query = {email};
+      const newRole = req.body.role;
+      const updateInfo = {
+        $set: {
+          role: newRole,
+        },
+      };
+      const result = await userCollection.updateOne(query, updateInfo);
+      res.send(result);
+    });
 
     
     // user
@@ -91,7 +120,7 @@ async function run() {
     // manager middlewere করতে হবে***********
     app.post("/products", async (req, res) => {
       const productInfo = req.body;
-      productInfo.createdAt = new Date().toLocaleString()
+      productInfo.createdAt = new Date().toLocaleString();
       const result = await productsCollection.insertOne(productInfo);
       res.send(result);
     });
@@ -119,26 +148,28 @@ async function run() {
           customerName: paymentInfo?.firstName,
           customerEmail: paymentInfo?.email,
           customerAddress: paymentInfo?.address,
-          quantity: paymentInfo?.orderQuantity
+          quantity: paymentInfo?.orderQuantity,
         },
         success_url: `${process.env.CLIENT_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${process.env.CLIENT_DOMAIN}/productDetails/${paymentInfo?.id}`,
       });
 
-      res.send({url: session.url})
+      res.send({ url: session.url });
     });
 
-
-
-    app.post('/payment-success', async(req, res)=> {
-      const {sessionId} = req.body
+    app.post("/payment-success", async (req, res) => {
+      const { sessionId } = req.body;
       const session = await stripe.checkout.sessions.retrieve(sessionId);
 
-      const product = await productsCollection.findOne({_id: new ObjectId(session.metadata.productId)})
+      const product = await productsCollection.findOne({
+        _id: new ObjectId(session.metadata.productId),
+      });
 
-      const order = await ordersCollection.findOne({transectionId:session.payment_intent})
+      const order = await ordersCollection.findOne({
+        transectionId: session.payment_intent,
+      });
 
-      if(session.status === 'complete' && product && !order){
+      if (session.status === "complete" && product && !order) {
         const orderInfo = {
           productName: product.productName,
           productId: session.metadata.productId,
@@ -149,60 +180,57 @@ async function run() {
           quantity: session.metadata.quantity,
           managerEmail: product.managerEmail,
           seller: product.sellerName,
-          price: session.amount_total / 100
-        }
-        const result = await ordersCollection.insertOne(orderInfo)
+          price: session.amount_total / 100,
+        };
+        const result = await ordersCollection.insertOne(orderInfo);
 
         await productsCollection.updateOne(
-          {_id: new ObjectId(session.metadata.productId),},
+          { _id: new ObjectId(session.metadata.productId) },
           {
-            $inc: {availableQuantity: -1}
+            $inc: { availableQuantity: -1 },
           }
-        )
+        );
         return res.send({
           transectionId: session.payment_intent,
-          orderId: order._id
-        })
+          orderId: order._id,
+        });
       }
-      res.send(result)
-    })
-
-
-
+      res.send(result);
+    });
 
     // get orders for buyer
-    app.get('/my-orders/:email', async(req, res)=> {
-      const email = req.params.email
-
-      const result = await ordersCollection.find({customer: email}).toArray()
-      res.send(result)
-    })
-
+    app.get("/my-orders", verifyFBToken, async (req, res) => {
+      const result = await ordersCollection
+        .find({ customer: req.tokenEmail })
+        .toArray();
+      res.send(result);
+    });
 
     // all orders for admin
-    app.get('/all-orders', async(req, res)=> {
+    app.get("/all-orders", async (req, res) => {
       const result = await ordersCollection.find().toArray();
       res.send(result);
-    })
-
+    });
 
     // get orders for manager
-    app.get('/manage-orders/:email', async(req, res)=> {
-      const email = req.params.email
+    app.get("/manage-orders/:email", async (req, res) => {
+      const email = req.params.email;
 
-      const result = await ordersCollection.find({managerEmail: email}).toArray()
-      res.send(result)
-    })
+      const result = await ordersCollection
+        .find({ managerEmail: email })
+        .toArray();
+      res.send(result);
+    });
 
     // get products for manage
-    app.get('/manage-product/:email', async(req, res)=> {
-      const email = req.params.email
+    app.get("/manage-product/:email", async (req, res) => {
+      const email = req.params.email;
 
-      const result = await productsCollection.find({managerEmail: email}).toArray()
-      res.send(result)
-    })
-
-
+      const result = await productsCollection
+        .find({ managerEmail: email })
+        .toArray();
+      res.send(result);
+    });
 
     await client.db("admin").command({ ping: 1 });
     console.log(
