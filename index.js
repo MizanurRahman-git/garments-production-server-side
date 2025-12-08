@@ -46,6 +46,19 @@ async function run() {
     const productsCollection = db.collection("products");
     const ordersCollection = db.collection("orders");
 
+
+
+
+
+    // get user for admin
+    app.get('/users', async(req, res)=> {
+      const result = await userCollection.find().toArray();
+      res.send(result);
+    })
+
+
+
+    
     // user
     app.post("/users", async (req, res) => {
       const user = req.body;
@@ -127,12 +140,14 @@ async function run() {
 
       if(session.status === 'complete' && product && !order){
         const orderInfo = {
+          productName: product.productName,
           productId: session.metadata.productId,
           transectionId: session.payment_intent,
-          customer: session.metadata.customerName,
+          customer: session.metadata.customerEmail,
           status: "Panding",
           customerAddress: session.metadata.customerAddress,
           quantity: session.metadata.quantity,
+          managerEmail: product.managerEmail,
           seller: product.sellerName,
           price: session.amount_total / 100
         }
@@ -151,6 +166,43 @@ async function run() {
       }
       res.send(result)
     })
+
+
+
+
+    // get orders for buyer
+    app.get('/my-orders/:email', async(req, res)=> {
+      const email = req.params.email
+
+      const result = await ordersCollection.find({customer: email}).toArray()
+      res.send(result)
+    })
+
+
+    // all orders for admin
+    app.get('/all-orders', async(req, res)=> {
+      const result = await ordersCollection.find().toArray();
+      res.send(result);
+    })
+
+
+    // get orders for manager
+    app.get('/manage-orders/:email', async(req, res)=> {
+      const email = req.params.email
+
+      const result = await ordersCollection.find({managerEmail: email}).toArray()
+      res.send(result)
+    })
+
+    // get products for manage
+    app.get('/manage-product/:email', async(req, res)=> {
+      const email = req.params.email
+
+      const result = await productsCollection.find({managerEmail: email}).toArray()
+      res.send(result)
+    })
+
+
 
     await client.db("admin").command({ ping: 1 });
     console.log(
