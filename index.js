@@ -9,16 +9,24 @@ const crypto = require("crypto");
 
 const admin = require("firebase-admin");
 
-const serviceAccount = require("./garments-firebase-adminsdk.json");
-const { create } = require("domain");
+const decoded = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString(
+  "utf8"
+);
+const serviceAccount = JSON.parse(decoded);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
 
 // MiddleWare
+app.use(
+  cors({
+    origin: [process.env.CLIENT_DOMAIN],
+    credentials: true,
+    optionSuccessStatus: 200,
+  })
+);
 app.use(express.json());
-app.use(cors());
 
 const generateTrackingId = () => {
   const prefix = "PRCL";
@@ -56,7 +64,6 @@ app.get("/", (req, res) => {
 
 async function run() {
   try {
-    await client.connect();
     const db = client.db("GarmentsPro");
     const userCollection = db.collection("users");
     const productsCollection = db.collection("products");
@@ -108,21 +115,28 @@ async function run() {
 
     // Products
     app.get("/products", async (req, res) => {
-      const {searchText} = req.query
-      const query = {}
-      if(searchText){
-        query.productName={$regex: searchText, $options:'i'}
+      const { searchText } = req.query;
+      const query = {};
+      if (searchText) {
+        query.productName = { $regex: searchText, $options: "i" };
       }
-      const result = await productsCollection.find(query).sort({createdAt: -1}).toArray();
+      const result = await productsCollection
+        .find(query)
+        .sort({ createdAt: -1 })
+        .toArray();
 
       res.send(result);
     });
 
     // get product for home page just 6 items
-    app.get('/display-product', async (req, res)=> {
-      const result = await productsCollection.find().sort({createdAt: -1}).limit(6).toArray()
-      res.send(result)
-    })
+    app.get("/display-product", async (req, res) => {
+      const result = await productsCollection
+        .find()
+        .sort({ createdAt: -1 })
+        .limit(6)
+        .toArray();
+      res.send(result);
+    });
 
     app.get("/product/:id", async (req, res) => {
       const id = req.params.id;
@@ -131,7 +145,6 @@ async function run() {
       });
       res.send(result);
     });
-
 
     app.post("/products", async (req, res) => {
       const productInfo = req.body;
@@ -256,10 +269,10 @@ async function run() {
 
     // all orders for admin
     app.get("/all-orders", async (req, res) => {
-      const searchText = req.query.searchText
-      const query = {}
-      if(searchText){
-        query.productName={$regex: searchText, $options:'i'}
+      const searchText = req.query.searchText;
+      const query = {};
+      if (searchText) {
+        query.productName = { $regex: searchText, $options: "i" };
       }
       const result = await ordersCollection.find(query).toArray();
       res.send(result);
@@ -299,15 +312,16 @@ async function run() {
     // get products for manage
     app.get("/manage-product/:email", async (req, res) => {
       const email = req.params.email;
-      const searchText = req.query.searchText
-      const query = {managerEmail: email}
+      const searchText = req.query.searchText;
+      const query = { managerEmail: email };
 
-      if(searchText){
-        query.productName={$regex: searchText, $options:'i'}
+      if (searchText) {
+        query.productName = { $regex: searchText, $options: "i" };
       }
 
       const result = await productsCollection
-        .find(query).sort({createdAt: -1})
+        .find(query)
+        .sort({ createdAt: -1 })
         .toArray();
       res.send(result);
     });
@@ -326,10 +340,10 @@ async function run() {
       res.send(result);
     });
 
-    await client.db("admin").command({ ping: 1 });
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!"
-    );
+    // await client.db("admin").command({ ping: 1 });
+    // console.log(
+    //   "Pinged your deployment. You successfully connected to MongoDB!"
+    // );
   } finally {
   }
 }
