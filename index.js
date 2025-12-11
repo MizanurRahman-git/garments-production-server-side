@@ -10,6 +10,7 @@ const crypto = require("crypto");
 const admin = require("firebase-admin");
 
 const serviceAccount = require("./garments-firebase-adminsdk.json");
+const { create } = require("domain");
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -63,7 +64,10 @@ async function run() {
 
     // get user for admin
     app.get("/users", verifyFBToken, async (req, res) => {
-      const result = await userCollection.find().toArray();
+      const adminEmail = req.tokenEmail;
+      const result = await userCollection
+        .find({ email: { $ne: adminEmail } })
+        .toArray();
       res.send(result);
     });
 
@@ -76,7 +80,7 @@ async function run() {
     // update user role
     app.patch("/users/:email/role", async (req, res) => {
       const email = req.params.email;
-      const query = {email};
+      const query = { email };
       const newRole = req.body.role;
       const updateInfo = {
         $set: {
@@ -87,7 +91,6 @@ async function run() {
       res.send(result);
     });
 
-    
     // user
     app.post("/users", async (req, res) => {
       const user = req.body;
@@ -105,9 +108,21 @@ async function run() {
 
     // Products
     app.get("/products", async (req, res) => {
-      const result = await productsCollection.find().toArray();
+      const {searchText} = req.query
+      const query = {}
+      if(searchText){
+        query.productName={$regex: searchText, $options:'i'}
+      }
+      const result = await productsCollection.find(query).sort({createdAt: -1}).toArray();
+
       res.send(result);
     });
+
+    // get product for home page just 6 items
+    app.get('/display-product', async (req, res)=> {
+      const result = await productsCollection.find().sort({createdAt: -1}).limit(6).toArray()
+      res.send(result)
+    })
 
     app.get("/product/:id", async (req, res) => {
       const id = req.params.id;
@@ -117,11 +132,42 @@ async function run() {
       res.send(result);
     });
 
-    // manager middlewere করতে হবে***********
+
     app.post("/products", async (req, res) => {
       const productInfo = req.body;
       productInfo.createdAt = new Date().toLocaleString();
       const result = await productsCollection.insertOne(productInfo);
+      res.send(result);
+    });
+
+    // update product
+    app.patch("/product/:id", async (req, res) => {
+      const info = req.body;
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+
+      const updateInfo = {
+        $set: {
+          productName: info.productName,
+          productPrice: info.productPrice,
+          category: info.category,
+          availableQuantity: info.availableQuantity,
+          description: info.description,
+          image: info.image,
+          minimumQuantity: info.minimumQuantity,
+          paymentOptions: info.paymentOptions,
+          videoLink: info.videoLink,
+        },
+      };
+      const result = await productsCollection.updateOne(query, updateInfo);
+      res.send(result);
+    });
+
+    // product delete
+    app.delete("/product/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await productsCollection.deleteOne(query);
       res.send(result);
     });
 
@@ -176,11 +222,13 @@ async function run() {
           transectionId: session.payment_intent,
           customer: session.metadata.customerEmail,
           status: "Panding",
+          trackingId: generateTrackingId(),
           customerAddress: session.metadata.customerAddress,
           quantity: session.metadata.quantity,
           managerEmail: product.managerEmail,
           seller: product.sellerName,
           price: session.amount_total / 100,
+          createAt: new Date().toLocaleDateString(),
         };
         const result = await ordersCollection.insertOne(orderInfo);
 
@@ -208,14 +256,40 @@ async function run() {
 
     // all orders for admin
     app.get("/all-orders", async (req, res) => {
-      const result = await ordersCollection.find().toArray();
+      const searchText = req.query.searchText
+      const query = {}
+      if(searchText){
+        query.productName={$regex: searchText, $options:'i'}
+      }
+      const result = await ordersCollection.find(query).toArray();
+      res.send(result);
+    });
+
+    // get single order
+    app.get("/single-order/:id", verifyFBToken, async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await ordersCollection.findOne(query);
+      res.send(result);
+    });
+
+    // update order status
+    app.patch("/update-order/:id", async (req, res) => {
+      const id = req.params.id;
+      const { status } = req.body;
+      const query = { _id: new ObjectId(id) };
+      const updateInfo = {
+        $set: {
+          status: status,
+        },
+      };
+      const result = await ordersCollection.updateOne(query, updateInfo);
       res.send(result);
     });
 
     // get orders for manager
     app.get("/manage-orders/:email", async (req, res) => {
       const email = req.params.email;
-
       const result = await ordersCollection
         .find({ managerEmail: email })
         .toArray();
@@ -225,10 +299,30 @@ async function run() {
     // get products for manage
     app.get("/manage-product/:email", async (req, res) => {
       const email = req.params.email;
+      const searchText = req.query.searchText
+      const query = {managerEmail: email}
+
+      if(searchText){
+        query.productName={$regex: searchText, $options:'i'}
+      }
 
       const result = await productsCollection
-        .find({ managerEmail: email })
+        .find(query).sort({createdAt: -1})
         .toArray();
+      res.send(result);
+    });
+
+    // get panding product
+    app.get("/panding-orders", async (req, res) => {
+      const query = { status: "Panding" };
+      const result = await ordersCollection.find(query).toArray();
+      res.send(result);
+    });
+
+    // Approved orders
+    app.get("/approved-orders", async (req, res) => {
+      const query = { status: "Approved" };
+      const result = await ordersCollection.find(query).toArray();
       res.send(result);
     });
 
