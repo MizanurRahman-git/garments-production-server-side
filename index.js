@@ -21,9 +21,9 @@ admin.initializeApp({
 // MiddleWare
 app.use(
   cors({
-    origin: [process.env.CLIENT_DOMAIN],
-    credentials: true,
-    optionSuccessStatus: 200,
+    // origin: [process.env.CLIENT_DOMAIN],
+    // credentials: true,
+    // optionSuccessStatus: 200,
   })
 );
 app.use(express.json());
@@ -115,17 +115,23 @@ async function run() {
 
     // Products
     app.get("/products", async (req, res) => {
-      const { searchText } = req.query;
+      const { searchText, limit, skip } = req.query;
+      
       const query = {};
       if (searchText) {
         query.productName = { $regex: searchText, $options: "i" };
       }
+
       const result = await productsCollection
         .find(query)
+        .limit(Number(limit))
+        .skip(Number(skip))
         .sort({ createdAt: -1 })
         .toArray();
 
-      res.send(result);
+      const count = await productsCollection.countDocuments();
+
+      res.send({ result, total: count });
     });
 
     // get product for home page just 6 items
@@ -133,7 +139,7 @@ async function run() {
       const result = await productsCollection
         .find()
         .sort({ createdAt: -1 })
-        .limit(6)
+        .limit(8)
         .toArray();
       res.send(result);
     });
