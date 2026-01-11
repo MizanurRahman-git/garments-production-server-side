@@ -21,9 +21,9 @@ admin.initializeApp({
 // MiddleWare
 app.use(
   cors({
-    // origin: [process.env.CLIENT_DOMAIN],
-    // credentials: true,
-    // optionSuccessStatus: 200,
+    origin: [process.env.CLIENT_DOMAIN],
+    credentials: true,
+    optionSuccessStatus: 200,
   })
 );
 app.use(express.json());
